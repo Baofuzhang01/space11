@@ -58,7 +58,21 @@ jobs:
           TULINGCLOUD_PASSWORD: ${{ secrets.TULINGCLOUD_PASSWORD }}
           TULINGCLOUD_MODEL_ID: ${{ secrets.TULINGCLOUD_MODEL_ID }}
         run: |
-          python main.py --action --dispatch
+          python main.py --action --dispatch 2>&1 | tee reserve.log
+
+      - name: Extract key logs
+        if: ${{ always() }}
+        run: |
+          user_name='${{ matrix.user.remark || matrix.user.username || "user" }}'
+          {
+            echo "### 用户关键日志 - ${user_name}"
+            echo
+            echo "筛选规则：登录、策略首枪、burst发射/结果、提交参数、保存失败、座位递增、结束状态"
+            echo
+            echo '```text'
+            grep -E "Start first attempt|login successfully|\[strategic\]|\[burst\]|submit parameter|保存失败|seat-increment|Current time|reserved successfully|success list" reserve.log | tail -n 200 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   reserve-manual:
     if: ${{ github.event_name == 'workflow_dispatch' }}
