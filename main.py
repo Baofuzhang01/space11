@@ -96,19 +96,21 @@ def _pick_ordered_fallback_seat(
 
 
 ENDTIME = "20:00:40"  # 根据学校的预约座位时间+40ms即可
+WARM_CONNECTION_LEAD_MS = 2200  # 连接预热提前量（毫秒）
+FIRST_TOKEN_DATE_MODE = "today"  # 首次取 token 的日期：today 或 submit_date
 RESERVE_NEXT_DAY = True  # 预约明天而不是今天的
 ENABLE_SLIDER = False  # 是否有滑块验证（调试阶段先关闭）
 ENABLE_TEXTCLICK = False  # 是否有选字验证码（需要图灵云打码平台）
+SEAT_API_MODE = "seat"  # 选座接口模式：auto / seatengine / seat
+
+FAST_PROBE_START_OFFSET_MS = 17  # 目标时间后多少毫秒开始轻探测
+FAST_PROBE_INTERVAL_MS = 2  # 轻探测轮询间隔（毫秒）
+FAST_PROBE_DEADLINE_MS = 1100  # 目标时间后多久强制结束轻探测并正式取 token
 
 
 MAX_ATTEMPT = 1
 SLEEPTIME = 0.05  # 每次抢座的间隔（减少到0.05秒以加快速度）
-WARM_CONNECTION_LEAD_MS = 2200  # 连接预热提前量（毫秒）
-FIRST_TOKEN_DATE_MODE = "today"  # 首次取 token 的日期：today 或 submit_date
-SEAT_API_MODE = "seat"  # 选座接口模式：auto / seatengine / seat
-FAST_PROBE_START_OFFSET_MS = 21  # 目标时间后多少毫秒开始轻探测
-FAST_PROBE_INTERVAL_MS = 2  # 轻探测轮询间隔（毫秒）
-FAST_PROBE_DEADLINE_MS = 1100  # 目标时间后多久强制结束轻探测并正式取 token
+
 
 
 # 是否在每一轮主循环中都重新登录。

@@ -167,7 +167,8 @@ function resolveServerApiKey(env, school = null) {
 
 function resolveDispatchTarget(school = null) {
   const raw = normalizeSecretText(school?.dispatch_target).toLowerCase();
-  return ["github", "server", "both"].includes(raw) ? raw : "github";
+  if (raw === "server") return "server_relay";
+  return ["github", "server_relay", "both"].includes(raw) ? raw : "github";
 }
 
 function sanitizeSchoolForClient(school) {
@@ -789,7 +790,7 @@ async function dispatchUsersInBatches(env, school, users) {
     console.log(`Dispatch skipped for school ${school.id}: missing GitHub token`);
     return { okBatches: 0, totalBatches: batches.length, error: "Missing GitHub token" };
   }
-  if ((dispatchTarget === "server" || dispatchTarget === "both") && !serverUrl) {
+  if ((dispatchTarget === "server_relay" || dispatchTarget === "both") && !serverUrl) {
     console.log(`Dispatch skipped for school ${school.id}: missing server_url`);
     return { okBatches: 0, totalBatches: batches.length, error: "Missing server_url" };
   }
@@ -812,9 +813,28 @@ async function dispatchUsersInBatches(env, school, users) {
     let serverDetail = "";
 
     if (dispatchTarget === "github" || dispatchTarget === "both") {
-      githubStatus = (await dispatchGitHub(dispatchToken, school.repo, payload)) ? "ok" : "fail";
+      const githubResp = await dispatchGitHubVerbose(dispatchToken, school.repo, payload);
+      githubStatus = githubResp.ok ? "ok" : "fail";
+      if (!githubResp.ok) {
+        const detailText = normalizeSecretText(githubResp.detail);
+        githubDetail = detailText
+          ? `${githubResp.status || 0}: ${detailText}`
+          : String(githubResp.status || 0);
+      }
     }
-    if (dispatchTarget === "server" || dispatchTarget === "both") {
+    if (dispatchTarget === "server_relay") {
+      const githubResp = await dispatchGitHubVerbose(dispatchToken, school.repo, payload);
+      serverStatus = githubResp.ok ? "ok" : "fail";
+      if (!githubResp.ok) {
+        const detailText = normalizeSecretText(githubResp.detail);
+        serverDetail = detailText
+          ? `via-github-relay, ${githubResp.status || 0}: ${detailText}`
+          : `via-github-relay, ${String(githubResp.status || 0)}`;
+      } else {
+        serverDetail = "via-github-relay";
+      }
+    }
+    if (dispatchTarget === "both") {
       const serverResp = await dispatchServerVerbose(serverUrl, serverApiKey, payload);
       serverStatus = serverResp.ok ? "ok" : "fail";
       if (!serverResp.ok) {
@@ -1483,6 +1503,10 @@ async function handleAPI(request, env, path) {
         fidEnc: school.fidEnc || s.fidEnc || "",
       })),
       endtime: school.endtime,
+      seat_api_mode: school.seat_api_mode || "seat",
+      reserve_next_day: school.reserve_next_day !== false,
+      enable_slider: !!school.enable_slider,
+      enable_textclick: !!school.enable_textclick,
       strategy: randomizeStrategy(school.strategy),
     };
     const dispatchToken = resolveGitHubToken(env, school);
@@ -2177,11 +2201,11 @@ function renderAddSchoolModal() {
             <label>分发目标</label>
             <select id="new_school_dispatch_target">
               <option value="github">github - 仅 GitHub Actions</option>
-              <option value="server">server - 仅服务器直跑</option>
-              <option value="both">both - 同时发 GitHub 和服务器</option>
+              <option value="server_relay">server_relay - GitHub 中转到服务器</option>
+              <option value="both">both - GitHub 与服务器直连同时发</option>
             </select>
           </div>
-          <div id="new_school_server_only_fields" style="display:none">
+          <div id="new_school_server_only_fields">
             <div class="form-group">
               <label>选座接口模式</label>
               <select id="new_school_seat_api_mode">
@@ -2281,11 +2305,11 @@ function renderSchoolDetail() {
           <div><strong>GitHub仓库:</strong> \${s.repo}</div>
           <div><strong>今日活跃用户:</strong> \${formatActiveTodayMeta(s.id)}</div>
           <div><strong>GitHub 密匙槽位:</strong> \${s.github_token_key ? s.github_token_key.toUpperCase() : "默认 GH_TOKEN"}</div>
-          <div><strong>选座接口:</strong> \${(s.dispatch_target === "server" || s.dispatch_target === "both") ? (s.seat_api_mode || "seat") : "-"}</div>
-          <div><strong>预约日期:</strong> \${(s.dispatch_target === "server" || s.dispatch_target === "both") ? (s.reserve_next_day === false ? "今天" : "明天") : "-"}</div>
+          <div><strong>选座接口:</strong> \${s.seat_api_mode || "seat"}</div>
+          <div><strong>预约日期:</strong> \${s.reserve_next_day === false ? "今天" : "明天"}</div>
           <div><strong>学校 fidEnc:</strong> \${s.fidEnc || "-"}</div>
           <div><strong>冲突分组:</strong> \${s.conflict_group || (s.fidEnc ? "自动按 fidEnc" : (s.name || "-"))}</div>
-          <div><strong>验证码:</strong> \${(s.dispatch_target === "server" || s.dispatch_target === "both") ? (s.enable_slider ? "滑块" : (s.enable_textclick ? "选字" : "关闭")) : "-"}</div>
+          <div><strong>验证码:</strong> \${s.enable_slider ? "滑块" : (s.enable_textclick ? "选字" : "关闭")}</div>
           <div><strong>分发目标:</strong> \${s.dispatch_target || "github"}</div>
           <div><strong>服务器地址:</strong> \${s.server_url || "-"}</div>
           <div><strong>服务器并发:</strong> \${s.server_max_concurrency || 13}</div>
@@ -2409,8 +2433,8 @@ function renderEditSchoolModal() {
             <label>分发目标</label>
             <select id="edit_school_dispatch_target">
               <option value="github" \${(!s.dispatch_target || s.dispatch_target==="github") ? "selected" : ""}>github - 仅 GitHub Actions</option>
-              <option value="server" \${s.dispatch_target==="server" ? "selected" : ""}>server - 仅服务器直跑</option>
-              <option value="both" \${s.dispatch_target==="both" ? "selected" : ""}>both - 同时发 GitHub 和服务器</option>
+              <option value="server_relay" \${s.dispatch_target==="server_relay" ? "selected" : ""}>server_relay - GitHub 中转到服务器</option>
+              <option value="both" \${s.dispatch_target==="both" ? "selected" : ""}>both - GitHub 与服务器直连同时发</option>
             </select>
           </div>
           <div class="form-group">
@@ -2424,7 +2448,7 @@ function renderEditSchoolModal() {
               <option value="e" \${s.github_token_key==="e" ? "selected" : ""}>E -> GH_TOKEN_E</option>
             </select>
           </div>
-          <div id="edit_school_server_only_fields" style="display:none">
+          <div id="edit_school_server_only_fields">
             <div class="form-group">
               <label>选座接口模式</label>
               <select id="edit_school_seat_api_mode">
@@ -2648,31 +2672,11 @@ function renderUserModal() {
   \`;
 }
 
-function _isServerDispatchTarget(value) {
-  const target = String(value || "").trim().toLowerCase();
-  return target === "server" || target === "both";
-}
-
-function toggleSchoolServerOnlyFields(prefix) {
-  const select = document.getElementById(prefix + "_school_dispatch_target");
-  const wrapper = document.getElementById(prefix + "_school_server_only_fields");
-  if (!select || !wrapper) return;
-  wrapper.style.display = _isServerDispatchTarget(select.value) ? "" : "none";
-}
-
 function bindEvents() {
   const addTarget = document.getElementById("new_school_dispatch_target");
-  if (addTarget && !addTarget.dataset.boundChange) {
-    addTarget.addEventListener("change", () => toggleSchoolServerOnlyFields("new"));
-    addTarget.dataset.boundChange = "1";
-  }
   const editTarget = document.getElementById("edit_school_dispatch_target");
-  if (editTarget && !editTarget.dataset.boundChange) {
-    editTarget.addEventListener("change", () => toggleSchoolServerOnlyFields("edit"));
-    editTarget.dataset.boundChange = "1";
-  }
-  toggleSchoolServerOnlyFields("new");
-  toggleSchoolServerOnlyFields("edit");
+  if (addTarget && !addTarget.dataset.boundChange) addTarget.dataset.boundChange = "1";
+  if (editTarget && !editTarget.dataset.boundChange) editTarget.dataset.boundChange = "1";
 }
 
 async function doLogin() {
@@ -2728,11 +2732,11 @@ async function doAddSchool() {
     endtime,
     fidEnc,
   };
-  if (_isServerDispatchTarget(dispatch_target)) {
-    body.seat_api_mode = document.getElementById("new_school_seat_api_mode").value.trim().toLowerCase();
-    body.reserve_next_day = document.getElementById("new_school_reserve_next_day").checked;
-    body.enable_slider = document.getElementById("new_school_enable_slider").checked;
-    body.enable_textclick = document.getElementById("new_school_enable_textclick").checked;
+  body.seat_api_mode = document.getElementById("new_school_seat_api_mode").value.trim().toLowerCase();
+  body.reserve_next_day = document.getElementById("new_school_reserve_next_day").checked;
+  body.enable_slider = document.getElementById("new_school_enable_slider").checked;
+  body.enable_textclick = document.getElementById("new_school_enable_textclick").checked;
+  if (dispatch_target === "server_relay" || dispatch_target === "both") {
     body.server_url = document.getElementById("new_school_server_url").value.trim();
     body.server_api_key = document.getElementById("new_school_server_api_key").value.trim();
     body.server_max_concurrency = parseInt(document.getElementById("new_school_server_max_concurrency").value, 10) || 13;
@@ -2849,11 +2853,11 @@ async function doEditSchool() {
       burst_jitter_range_ms: burstJitterRange,
     }
   };
-  if (_isServerDispatchTarget(dispatchTarget)) {
-    body.seat_api_mode = document.getElementById("edit_school_seat_api_mode").value.trim().toLowerCase();
-    body.reserve_next_day = document.getElementById("edit_school_reserve_next_day").checked;
-    body.enable_slider = document.getElementById("edit_school_enable_slider").checked;
-    body.enable_textclick = document.getElementById("edit_school_enable_textclick").checked;
+  body.seat_api_mode = document.getElementById("edit_school_seat_api_mode").value.trim().toLowerCase();
+  body.reserve_next_day = document.getElementById("edit_school_reserve_next_day").checked;
+  body.enable_slider = document.getElementById("edit_school_enable_slider").checked;
+  body.enable_textclick = document.getElementById("edit_school_enable_textclick").checked;
+  if (dispatchTarget === "server_relay" || dispatchTarget === "both") {
     body.server_url = document.getElementById("edit_school_server_url").value.trim();
     body.server_max_concurrency = parseInt(document.getElementById("edit_school_server_max_concurrency").value, 10) || 13;
     const serverApiKeyInput = document.getElementById("edit_school_server_api_key").value.trim();

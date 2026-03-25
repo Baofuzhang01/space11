@@ -37,20 +37,42 @@ def _iter_users(payload: dict) -> list[dict]:
     return [payload]
 
 
-def _run_one(user: dict, index: int, run_dir: pathlib.Path) -> dict:
+def _build_user_dispatch_payload(payload: dict, user: dict) -> dict:
+    merged = dict(user)
+    inherited_keys = [
+        "strategy",
+        "endtime",
+        "seat_api_mode",
+        "reserve_next_day",
+        "enable_slider",
+        "enable_textclick",
+    ]
+    for key in inherited_keys:
+        if key not in merged and key in payload:
+            merged[key] = payload.get(key)
+    return merged
+
+
+def _run_one(user: dict, index: int, run_dir: pathlib.Path, payload: dict) -> dict:
     username = str(user.get("username", "")).strip()
+    remark = (
+        user.get("remark")
+        or user.get("comments")
+        or ""
+    )
     nickname = (
         user.get("nickname")
         or user.get("nickName")
         or user.get("name")
-        or user.get("remark")
+        or remark
         or username
         or f"user_{index + 1}"
     )
-    log_name = username or nickname
+    log_name = remark or nickname or username
     log_path = run_dir / f"{index + 1:02d}_{_safe_name(log_name)}.log"
     env = os.environ.copy()
-    env["DISPATCH_PAYLOAD"] = json.dumps(user, ensure_ascii=False)
+    dispatch_payload = _build_user_dispatch_payload(payload, user)
+    env["DISPATCH_PAYLOAD"] = json.dumps(dispatch_payload, ensure_ascii=False)
 
     cmd = [sys.executable, "main.py", "--action", "--dispatch"]
     started_at = _beijing_now().isoformat()
@@ -71,7 +93,8 @@ def _run_one(user: dict, index: int, run_dir: pathlib.Path) -> dict:
     return {
         "index": index + 1,
         "username": username,
-        "display_name": username or nickname,
+        "display_name": remark or nickname or username,
+        "remark": remark,
         "nickname": nickname,
         "returncode": proc.returncode,
         "log_path": str(log_path),
@@ -112,7 +135,7 @@ def main():
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrency) as executor:
         futures = [
-            executor.submit(_run_one, user, idx, run_dir)
+            executor.submit(_run_one, user, idx, run_dir, payload)
             for idx, user in enumerate(users)
         ]
         for future in concurrent.futures.as_completed(futures):
