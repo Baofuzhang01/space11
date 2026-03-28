@@ -438,6 +438,8 @@ function defaultSchool(id, name) {
       submit_mode: "serial",
       login_lead_seconds: 18,
       slider_lead_seconds: 10,
+      fast_probe_start_offset_ms: 14,
+      fast_probe_start_range_ms: [14, 14],
       warm_connection_lead_ms: 2400,
       pre_fetch_token_ms: 1531,
       first_submit_offset_ms: 9,
@@ -445,7 +447,6 @@ function defaultSchool(id, name) {
       target_offset3_ms: 140,
       token_fetch_delay_ms: 45,
       first_token_date_mode: "submit_date",
-      token_fetch_delay_range_ms: [45, 45],
       burst_offsets_ms: [120, 420, 820],
       burst_jitter_range_ms: [0, 0],
     },
@@ -711,10 +712,13 @@ function parseRangeWithFallback(v, fallback) {
 
 function randomizeStrategy(base) {
   const s = { ...(base || {}) };
-  const tokenRange = parseRangeWithFallback(s.token_fetch_delay_range_ms, s.token_fetch_delay_ms || 45);
+  const probeStartRange = parseRangeWithFallback(
+    s.fast_probe_start_range_ms,
+    s.fast_probe_start_offset_ms || 14,
+  );
   const burstJitterRange = parseRangeWithFallback(s.burst_jitter_range_ms, 0);
 
-  s.token_fetch_delay_ms = randIntInclusive(tokenRange[0], tokenRange[1]);
+  s.fast_probe_start_offset_ms = randIntInclusive(probeStartRange[0], probeStartRange[1]);
 
   const baseBurst = Array.isArray(s.burst_offsets_ms) ? s.burst_offsets_ms : [120, 420, 820];
   s.burst_offsets_ms = baseBurst.map(v => {
@@ -2539,6 +2543,16 @@ function renderEditSchoolModal() {
           </div>
           <div class="form-row">
             <div class="form-group">
+              <label>轻探测开始毫秒（fast_probe_start_offset_ms）</label>
+              <input type="number" id="edit_strategy_probe_start" value="\${st.fast_probe_start_offset_ms || 14}">
+            </div>
+            <div class="form-group">
+              <label>轻探测随机范围（fast_probe_start_range_ms）</label>
+              <input type="text" id="edit_strategy_probe_start_range" value="\${(st.fast_probe_start_range_ms || [st.fast_probe_start_offset_ms || 14, st.fast_probe_start_offset_ms || 14]).join(',')}" placeholder="例如: 8,20">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
               <label>首次取 token 日期（first_token_date_mode）</label>
               <select id="edit_strategy_first_token_date_mode">
                 <option value="submit_date" \${(!st.first_token_date_mode || st.first_token_date_mode==="submit_date")?"selected":""}>submit_date - 与提交日期一致</option>
@@ -2575,10 +2589,7 @@ function renderEditSchoolModal() {
             </div>
           </div>
           <div class="form-row">
-            <div class="form-group">
-              <label>取 token 随机范围（token_fetch_delay_range_ms）</label>
-              <input type="text" id="edit_strategy_delay_range" value="\${(st.token_fetch_delay_range_ms || [st.token_fetch_delay_ms || 45, st.token_fetch_delay_ms || 45]).join(',')}" placeholder="例如: 20,80">
-            </div>
+            <div class="form-group"></div>
             <div class="form-group">
               <label>burst_offsets_ms 抖动范围（burst_jitter_range_ms）</label>
               <input type="text" id="edit_strategy_burst_jitter" value="\${(st.burst_jitter_range_ms || [0,0]).join(',')}" placeholder="例如: -30,30（会加到每个 burst 偏移）">
@@ -2802,7 +2813,7 @@ async function doEditSchool() {
     if (arr.length >= 2) return [arr[0], arr[1]];
     return [fallbackA, fallbackB];
   };
-  const delayRange = parseRangeInput("edit_strategy_delay_range", 45, 45);
+  const probeStartRange = parseRangeInput("edit_strategy_probe_start_range", 14, 14);
   const burstJitterRange = parseRangeInput("edit_strategy_burst_jitter", 0, 0);
   const readingZonesRaw = (document.getElementById("edit_school_reading_zones").value || "").trim();
   let readingZoneGroups = [];
@@ -2836,13 +2847,14 @@ async function doEditSchool() {
       login_lead_seconds: parseInt(document.getElementById("edit_strategy_login").value) || 14,
       slider_lead_seconds: parseInt(document.getElementById("edit_strategy_slider").value) || 10,
       warm_connection_lead_ms: parseInt(document.getElementById("edit_strategy_warm_lead").value) || 2400,
+      fast_probe_start_offset_ms: parseInt(document.getElementById("edit_strategy_probe_start").value) || 14,
       pre_fetch_token_ms: parseInt(document.getElementById("edit_strategy_prefetch").value) || 1531,
       first_submit_offset_ms: parseInt(document.getElementById("edit_strategy_first").value) || 9,
       target_offset2_ms: parseInt(document.getElementById("edit_strategy_target2").value) || 24,
       target_offset3_ms: parseInt(document.getElementById("edit_strategy_target3").value) || 140,
       token_fetch_delay_ms: parseInt(document.getElementById("edit_strategy_delay").value) || 45,
       first_token_date_mode: document.getElementById("edit_strategy_first_token_date_mode").value,
-      token_fetch_delay_range_ms: delayRange,
+      fast_probe_start_range_ms: probeStartRange,
       burst_offsets_ms: burstOffsets.length ? burstOffsets : [120, 420, 820],
       burst_jitter_range_ms: burstJitterRange,
     }

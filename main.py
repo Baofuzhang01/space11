@@ -6,6 +6,8 @@ import logging
 import datetime
 import threading
 from zoneinfo import ZoneInfo
+from pathlib import Path
+from logging.handlers import TimedRotatingFileHandler
 
 # 统一日志时间为北京时间，方便在 GitHub Actions 日志中查看
 # 精确到毫秒，格式示例：2026-01-22 19:16:59.123 [Asia/Shanghai] - INFO - ...
@@ -24,8 +26,18 @@ _formatter = BeijingFormatter(
 )
 _handler = logging.StreamHandler()
 _handler.setFormatter(_formatter)
+_log_dir = Path(__file__).resolve().parent / "logs"
+_log_dir.mkdir(parents=True, exist_ok=True)
+_file_handler = TimedRotatingFileHandler(
+    filename=str(_log_dir / "reserve.log"),
+    when="midnight",
+    interval=1,
+    backupCount=1,
+    encoding="utf-8",
+)
+_file_handler.setFormatter(_formatter)
 
-logging.basicConfig(level=logging.INFO, handlers=[_handler])
+logging.basicConfig(level=logging.INFO, handlers=[_handler, _file_handler])
 
 
 def _beijing_now() -> datetime.datetime:
@@ -103,7 +115,7 @@ ENABLE_SLIDER = False  # 是否有滑块验证（调试阶段先关闭）
 ENABLE_TEXTCLICK = False  # 是否有选字验证码（需要图灵云打码平台）
 SEAT_API_MODE = "seat"  # 选座接口模式：auto / seatengine / seat
 
-FAST_PROBE_START_OFFSET_MS = 17  # 目标时间后多少毫秒开始轻探测
+FAST_PROBE_START_OFFSET_MS = 14  # 目标时间后多少毫秒开始轻探测
 FAST_PROBE_INTERVAL_MS = 2  # 轻探测轮询间隔（毫秒）
 FAST_PROBE_DEADLINE_MS = 1100  # 目标时间后多久强制结束轻探测并正式取 token
 
@@ -213,6 +225,7 @@ def _apply_strategy_config(config):
     global SUBMIT_MODE
     global BURST_OFFSETS_MS
     global TOKEN_FETCH_DELAY_MS
+    global FAST_PROBE_START_OFFSET_MS
     global WARM_CONNECTION_LEAD_MS
     global FIRST_TOKEN_DATE_MODE
     global SEAT_API_MODE
@@ -237,6 +250,9 @@ def _apply_strategy_config(config):
     SUBMIT_MODE = strategy_cfg.get("submit_mode", "serial")
     BURST_OFFSETS_MS = strategy_cfg.get("burst_offsets_ms", [120, 420, 820])
     TOKEN_FETCH_DELAY_MS = int(strategy_cfg.get("token_fetch_delay_ms", 50))
+    FAST_PROBE_START_OFFSET_MS = int(
+        strategy_cfg.get("fast_probe_start_offset_ms", FAST_PROBE_START_OFFSET_MS)
+    )
     WARM_CONNECTION_LEAD_MS = int(
         strategy_cfg.get("warm_connection_lead_ms", WARM_CONNECTION_LEAD_MS)
     )
@@ -303,6 +319,7 @@ def _probe_then_get_page_token(
     formal_fetch_not_before=None,
     not_open_retry_until=None,
     not_open_retry_interval: float | None = None,
+    start_log_message: str | None = None,
 ):
     """战略模式首枪取 token 前的轻量探测。"""
     probe_start_dt = target_dt + datetime.timedelta(milliseconds=FAST_PROBE_START_OFFSET_MS)
@@ -310,6 +327,9 @@ def _probe_then_get_page_token(
     if _beijing_now() < probe_start_dt:
         while _beijing_now() < probe_start_dt:
             time.sleep(0.001)
+
+    if start_log_message:
+        logging.info("%s，实际启动时间 %s", start_log_message, _beijing_now())
 
     probe_attempt = 0
     while True:
@@ -939,12 +959,6 @@ def strategic_first_attempt(
                 # 策略 C：先从 T + FAST_PROBE_START_OFFSET_MS 开始轻探测，
                 # 到 T + TOKEN_FETCH_DELAY_MS 后再正式取一次 token 并立即提交
                 fetch_dt = target_dt + datetime.timedelta(milliseconds=TOKEN_FETCH_DELAY_MS)
-                logging.info(
-                    f"[strategic] [C] 开始探测，当前时间 {_beijing_now()} "
-                    f"（从目标时刻 + {FAST_PROBE_START_OFFSET_MS}ms 开始轻探测，"
-                    f"不早于目标时刻 + {TOKEN_FETCH_DELAY_MS}ms 正式取 token），"
-                    f"目标链接：{_first_token_url}"
-                )
                 token1, value1 = _probe_then_get_page_token(
                     s,
                     _first_token_url,
@@ -953,6 +967,12 @@ def strategic_first_attempt(
                     formal_fetch_not_before=fetch_dt,
                     not_open_retry_until=not_open_retry_until,
                     not_open_retry_interval=0.005,
+                    start_log_message=(
+                        f"[strategic] [C] 开始探测"
+                        f"（从目标时刻 + {FAST_PROBE_START_OFFSET_MS}ms 开始轻探测，"
+                        f"不早于目标时刻 + {TOKEN_FETCH_DELAY_MS}ms 正式取 token），"
+                        f"目标链接：{_first_token_url}"
+                    ),
                 )
                 if not token1:
                     logging.error("[strategic] [C] Token fetch failed, skip this config")

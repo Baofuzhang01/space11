@@ -151,6 +151,7 @@ switch_remote.py
 auto_commit.sh
 extract_room_ids.py
 sync_shared_files.py
+.sync_shared_files_cache/
 
 # Cloudflare Workers 本地缓存
 workers/**/.wrangler/
@@ -165,3 +166,9 @@ utils/config.json
 
 # 本地部署记录
 DEPLOYMENT.md
+
+# 不上传到 GitHub 的本地目录
+pageexe/
+qianduan/
+server_store/
+deploy/
