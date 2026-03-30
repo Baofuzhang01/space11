@@ -140,7 +140,7 @@ def _pick_ordered_fallback_seat(
     return formatted_seat, formatted_offset
 
 
-ENDTIME = "22:00:40"  # 根据学校的预约座位时间+40ms即可
+ENDTIME = "20:00:40"  # 根据学校的预约座位时间+40ms即可
 WARM_CONNECTION_LEAD_MS = 2500  # 连接预热提前量（毫秒）
 FIRST_TOKEN_DATE_MODE = "today"  # 首次取 token 的日期：today 或 submit_date
 RESERVE_NEXT_DAY = True  # 预约明天而不是今天的
@@ -253,8 +253,6 @@ def _apply_strategy_config(config):
     global STRATEGIC_MODE
     global PRE_FETCH_TOKEN_MS
     global FIRST_SUBMIT_OFFSET_MS
-    global TARGET_OFFSET2_MS
-    global TARGET_OFFSET3_MS
     global SUBMIT_MODE
     global BURST_OFFSETS_MS
     global TOKEN_FETCH_DELAY_MS
@@ -278,8 +276,6 @@ def _apply_strategy_config(config):
     STRATEGIC_MODE = strategy_cfg.get("mode", "B")
     PRE_FETCH_TOKEN_MS = int(strategy_cfg.get("pre_fetch_token_ms", 3000))
     FIRST_SUBMIT_OFFSET_MS = int(strategy_cfg.get("first_submit_offset_ms", 89))
-    TARGET_OFFSET2_MS = int(strategy_cfg.get("target_offset2_ms", 150))
-    TARGET_OFFSET3_MS = int(strategy_cfg.get("target_offset3_ms", 160))
     SUBMIT_MODE = strategy_cfg.get("submit_mode", "serial")
     BURST_OFFSETS_MS = strategy_cfg.get("burst_offsets_ms", [120, 420, 820])
     TOKEN_FETCH_DELAY_MS = int(strategy_cfg.get("token_fetch_delay_ms", 50))
@@ -336,8 +332,6 @@ def _get_strategy_login_deadline(target_dt: datetime.datetime) -> datetime.datet
     else:
         max_offset_ms = max(
             FIRST_SUBMIT_OFFSET_MS,
-            TARGET_OFFSET2_MS,
-            TARGET_OFFSET3_MS,
             TOKEN_FETCH_DELAY_MS,
         )
     return target_dt + datetime.timedelta(milliseconds=max_offset_ms + 500)
@@ -1085,7 +1079,7 @@ def strategic_first_attempt(
                     value=value1,
                 )
 
-            # 如果第一次没有成功：为第二次提交重新获取页面 token，再延迟 TARGET_OFFSET2_MS 毫秒提交
+            # 如果第一次没有成功：重新获取页面 token，获取后立即提交第二枪
             if not suc:
                 if s.should_skip_followup_submit():
                     logging.info(
@@ -1095,17 +1089,30 @@ def strategic_first_attempt(
                     continue
                 logging.info("[strategic] First submit failed, prepare second submit with NEW page token")
 
-                token2, value2 = s._get_page_token(
-                    _submit_token_url,
-                    require_value=True,
-                )
+                if STRATEGIC_MODE == "A":
+                    token2, value2 = _probe_then_get_page_token(
+                        s,
+                        _submit_token_url,
+                        target_dt,
+                        require_value=True,
+                        not_open_retry_until=not_open_retry_until,
+                        not_open_retry_interval=0.005,
+                        start_log_message=(
+                            f"[strategic] [A] 第二枪开始轻探测"
+                            f"（沿用 FAST_PROBE_DEADLINE_MS={FAST_PROBE_DEADLINE_MS}ms 截止），"
+                            f"目标链接：{_submit_token_url}"
+                        ),
+                    )
+                else:
+                    token2, value2 = s._get_page_token(
+                        _submit_token_url,
+                        require_value=True,
+                    )
                 if not token2:
                     logging.error("[strategic] Failed to get page token for second submit, skip to third/normal flow")
                 else:
-                    send_dt2 = _beijing_now() + datetime.timedelta(milliseconds=TARGET_OFFSET2_MS)
-                    _wait_until(send_dt2)
                     logging.info(
-                        f"[strategic] Second submit at {send_dt2} (now + {TARGET_OFFSET2_MS}ms) with NEW page token"
+                        "[strategic] Second submit immediately after fetching NEW page token"
                     )
                     suc = s.get_submit(
                         url=s.submit_url,
@@ -1118,7 +1125,7 @@ def strategic_first_attempt(
                         value=value2,
                     )
 
-            # 如果第二次仍未成功：为第三次提交再次获取新的 token，再延迟 TARGET_OFFSET3_MS 毫秒提交
+            # 如果第二次仍未成功：重新获取页面 token，获取后立即提交第三枪
             if not suc:
                 if s.should_skip_followup_submit():
                     logging.info(
@@ -1135,10 +1142,8 @@ def strategic_first_attempt(
                 if not token3:
                     logging.error("[strategic] Failed to get page token for third submit, give up strategic submits for this config")
                 else:
-                    send_dt3 = _beijing_now() + datetime.timedelta(milliseconds=TARGET_OFFSET3_MS)
-                    _wait_until(send_dt3)
                     logging.info(
-                        f"[strategic] Third submit at {send_dt3} (now + {TARGET_OFFSET3_MS}ms) with NEW page token"
+                        "[strategic] Third submit immediately after fetching NEW page token"
                     )
                     suc = s.get_submit(
                         url=s.submit_url,
@@ -1535,8 +1540,8 @@ if __name__ == "__main__":
     # ├──────────┬────────────┬──────────────────────────────────────────────┤
     # │ mode=A   │ serial     │ T-pre_fetch_token_ms 预取token1              │
     # │          │            │ → T+first_submit_offset_ms POST，等结果       │
-    # │          │            │ → 失败则现取token2，+offset2 POST，等结果      │
-    # │          │            │ → 失败则现取token3，+offset3 POST             │
+    # │          │            │ → 失败则现取token2并立即POST，等结果           │
+    # │          │            │ → 失败则现取token3并立即POST                  │
     # ├──────────┼────────────┼──────────────────────────────────────────────┤
     # │ mode=A   │ burst ★   │ T-pre_fetch_token_ms 预取token1/2/3           │
     # │          │            │ → T+burst[0] thread-1 直接POST（零GET延迟）   │
@@ -1544,8 +1549,8 @@ if __name__ == "__main__":
     # │          │            │ → T+burst[2] thread-3 直接POST（零GET延迟）   │
     # ├──────────┼────────────┼──────────────────────────────────────────────┤
     # │ mode=B   │ serial     │ T+first_submit_offset_ms 取token1并POST，等结果│
-    # │ (默认)   │ (默认)     │ → 失败则现取token2，+offset2 POST，等结果      │
-    # │          │            │ → 失败则现取token3，+offset3 POST             │
+    # │ (默认)   │ (默认)     │ → 失败则现取token2并立即POST，等结果           │
+    # │          │            │ → 失败则现取token3并立即POST                  │
     # ├──────────┼────────────┼──────────────────────────────────────────────┤
     # │ mode=B   │ burst      │ T+burst[0] thread-1 自取token并POST           │
     # │          │            │ T+burst[1] thread-2 自取token并POST           │

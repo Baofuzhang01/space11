@@ -61,8 +61,6 @@ Tongyi Worker 顶部注释和实际代码里使用的核心键如下：
     "warm_connection_lead_ms": 2400,
     "pre_fetch_token_ms": 1531,
     "first_submit_offset_ms": 9,
-    "target_offset2_ms": 24,
-    "target_offset3_ms": 140,
     "token_fetch_delay_ms": 45,
     "first_token_date_mode": "submit_date",
     "burst_offsets_ms": [120, 420, 820],

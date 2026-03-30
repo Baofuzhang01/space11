@@ -443,8 +443,6 @@ function defaultSchool(id, name) {
       warm_connection_lead_ms: 2400,
       pre_fetch_token_ms: 1531,
       first_submit_offset_ms: 9,
-      target_offset2_ms: 24,
-      target_offset3_ms: 140,
       token_fetch_delay_ms: 45,
       first_token_date_mode: "submit_date",
       burst_offsets_ms: [120, 420, 820],
@@ -2572,17 +2570,7 @@ function renderEditSchoolModal() {
             </div>
           </div>
           <div class="form-row">
-            <div class="form-group">
-              <label>第二枪目标偏移毫秒（target_offset2_ms）</label>
-              <input type="number" id="edit_strategy_target2" value="\${st.target_offset2_ms || 24}">
-            </div>
             <div class="form-group"></div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>第三枪目标偏移毫秒（target_offset3_ms）</label>
-              <input type="number" id="edit_strategy_target3" value="\${st.target_offset3_ms || 140}">
-            </div>
             <div class="form-group">
               <label>并发连发偏移毫秒列表（burst_offsets_ms）</label>
               <input type="text" id="edit_strategy_burst" value="\${(st.burst_offsets_ms || [120,420,820]).join(',')}" placeholder="例如: 120,420,820">
@@ -2850,8 +2838,6 @@ async function doEditSchool() {
       fast_probe_start_offset_ms: parseInt(document.getElementById("edit_strategy_probe_start").value) || 14,
       pre_fetch_token_ms: parseInt(document.getElementById("edit_strategy_prefetch").value) || 1531,
       first_submit_offset_ms: parseInt(document.getElementById("edit_strategy_first").value) || 9,
-      target_offset2_ms: parseInt(document.getElementById("edit_strategy_target2").value) || 24,
-      target_offset3_ms: parseInt(document.getElementById("edit_strategy_target3").value) || 140,
       token_fetch_delay_ms: parseInt(document.getElementById("edit_strategy_delay").value) || 45,
       first_token_date_mode: document.getElementById("edit_strategy_first_token_date_mode").value,
       fast_probe_start_range_ms: probeStartRange,
