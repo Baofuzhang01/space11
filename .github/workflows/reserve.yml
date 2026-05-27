@@ -1,6 +1,8 @@
+name: Reserve Seat
+
 run-name: >-
   Reserve -
-  ${{ github.event.client_payload.trigger_date || github.event.client_payload.school_id || github.event.client_payload.remark || github.event.client_payload.username || 'manual' }}
+  ${{ github.event.client_payload.dispatch_id || github.event.client_payload.trigger_date || github.event.client_payload.school_id || github.event.client_payload.remark || github.event.client_payload.username || 'manual' }}
 
 on:
   repository_dispatch:

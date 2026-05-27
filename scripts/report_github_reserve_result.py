@@ -29,11 +29,41 @@ def load_json_text(text: str, default: Any) -> Any:
         return default
 
 
+def pick_user_payload(payload: Any) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+
+    account = normalize_text(os.getenv("CX_USERNAME"), 120)
+    users = payload.get("users")
+    if not isinstance(users, list):
+        users = payload.get("reserve")
+    if not isinstance(users, list):
+        return payload
+
+    selected = {}
+    for user in users:
+        if not isinstance(user, dict):
+            continue
+        user_account = normalize_text(user.get("phone") or user.get("username"), 120)
+        if account and user_account == account:
+            selected = user
+            break
+        if not selected:
+            selected = user
+    if not selected:
+        return {}
+
+    inherited = {key: value for key, value in payload.items() if key not in {"users", "reserve"}}
+    return {**inherited, **selected}
+
+
 def load_payload(args_payload: str) -> dict:
     raw_payload = args_payload or os.getenv("DISPATCH_PAYLOAD") or ""
     payload = load_json_text(raw_payload, {}) if raw_payload else {}
     if isinstance(payload, dict):
-        return payload
+        selected = pick_user_payload(payload)
+        if selected:
+            return selected
 
     event_path = os.getenv("GITHUB_EVENT_PATH")
     if event_path:
@@ -43,7 +73,7 @@ def load_payload(args_payload: str) -> dict:
             event = {}
         client_payload = event.get("client_payload") if isinstance(event, dict) else {}
         if isinstance(client_payload, dict):
-            return client_payload
+            return pick_user_payload(client_payload)
     return {}
 
 
