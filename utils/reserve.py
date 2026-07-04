@@ -12,6 +12,12 @@ from urllib.parse import urljoin, urlparse, parse_qs, unquote
 from urllib3.exceptions import InsecureRequestWarning
 from urllib3.util import Timeout as Urllib3Timeout
 from requests.adapters import HTTPAdapter
+from utils.captcha_ocr import (
+    DEFAULT_ICONCLICK_OCR_PROVIDER,
+    normalize_iconclick_ocr_provider,
+    normalize_tulingcloud_captcha_type,
+    tulingcloud_model_id,
+)
 from .time_utils import get_beijing_date, parse_times_range, resolve_request_day
 
 # Load environment variables from .env file
@@ -60,13 +66,15 @@ def _get_chaojiying_config():
     return username, password, soft_id, int(codetype or 9800)
 
 
-def _get_tulingcloud_config(model_id_env: str = "TULINGCLOUD_MODEL_ID"):
-    """从环境变量或 config.json 获取图灵云配置。"""
+def _get_tulingcloud_config(
+    captcha_type: str | None = None,
+):
+    """从环境变量或 config.json 获取图灵云账号密码；模型 ID 固定在 captcha_ocr/config.py。"""
+    captcha_type = normalize_tulingcloud_captcha_type(captcha_type)
     username = os.getenv("TULINGCLOUD_USERNAME", "")
     password = os.getenv("TULINGCLOUD_PASSWORD", "")
-    model_id = os.getenv(model_id_env, "")
 
-    if not all([username, password, model_id]):
+    if not all([username, password]):
         try:
             config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
             if os.path.exists(config_path):
@@ -75,13 +83,10 @@ def _get_tulingcloud_config(model_id_env: str = "TULINGCLOUD_MODEL_ID"):
                     tuling_config = config.get("tulingcloud", {})
                     username = username or tuling_config.get("username", "")
                     password = password or tuling_config.get("password", "")
-                    if model_id_env == "TULINGCLOUD_SPIN_MODEL_ID":
-                        model_id = model_id or tuling_config.get("spin_model_id", "")
-                    model_id = model_id or tuling_config.get("model_id", "")
         except Exception as e:
             logging.debug(f"Failed to read tulingcloud config from config.json: {e}")
 
-    return username, password, model_id
+    return username, password, tulingcloud_model_id(captcha_type)
 
 
 def get_date(day_offset: int = 0):
@@ -186,6 +191,7 @@ class reserve:
         enable_textclick=False,
         enable_iconclick=False,
         enable_rotate=False,
+        iconclick_ocr_provider=DEFAULT_ICONCLICK_OCR_PROVIDER,
         reserve_next_day=False,
         reserve_day_offset=None,
     ):
@@ -303,6 +309,10 @@ class reserve:
         self.enable_textclick = enable_textclick
         self.enable_iconclick = enable_iconclick
         self.enable_rotate = enable_rotate
+        self.iconclick_ocr_provider = normalize_iconclick_ocr_provider(
+            iconclick_ocr_provider
+            or os.getenv("ICONCLICK_OCR_PROVIDER", DEFAULT_ICONCLICK_OCR_PROVIDER)
+        )
         self.reserve_next_day = reserve_next_day
         self.reserve_day_offset = reserve_day_offset
         self._captcha_context = {}
@@ -1253,7 +1263,7 @@ class reserve:
         return ""
 
     def _resolve_iconclick_captcha(self):
-        """裁掉未展示的提示帧，使用超级鹰 9103 识别图标点击顺序。"""
+        """裁掉未展示的提示帧，并按配置选择 OCR 平台识别图标点击顺序。"""
         captcha_token, captcha_iv, image_url = self.get_iconclick_captcha_data()
         if not captcha_token or not image_url:
             logging.warning("获取图标点选验证码数据失败")
@@ -1288,15 +1298,33 @@ class reserve:
             if not ok:
                 return ""
 
-            from utils.chaojiying_ocr import ChaojiyingOCR
+            img_bytes = encoded.tobytes()
+            if self.iconclick_ocr_provider == "tulingcloud":
+                from utils.captcha_ocr import TulingCloudOCR
 
-            username, password, soft_id, _ = _get_chaojiying_config()
-            if not all([username, password, soft_id]):
-                logging.error("未配置图标点选所需的超级鹰账号信息")
-                return ""
-            positions = ChaojiyingOCR(
-                username, password, soft_id, codetype=9103
-            ).recognize_iconclick(encoded.tobytes())
+                username, password, model_id = _get_tulingcloud_config(
+                    captcha_type="iconclick"
+                )
+                if not all([username, password, model_id]):
+                    logging.error("未配置图灵云图标点选所需的账号信息")
+                    return ""
+                logging.info("图标点选使用图灵云识别，model_id=%s", model_id)
+                positions = TulingCloudOCR(
+                    username=username,
+                    password=password,
+                    model_id=model_id,
+                ).recognize_iconclick(img_bytes)
+            else:
+                from utils.captcha_ocr import ChaojiyingOCR
+
+                username, password, soft_id, _ = _get_chaojiying_config()
+                if not all([username, password, soft_id]):
+                    logging.error("未配置图标点选所需的超级鹰账号信息")
+                    return ""
+                logging.info("图标点选使用超级鹰 9103 识别")
+                positions = ChaojiyingOCR(
+                    username, password, soft_id, codetype=9103
+                ).recognize_iconclick(img_bytes)
         except Exception as e:
             logging.warning("图标点选识别失败：%s", e)
             return ""
@@ -1799,15 +1827,15 @@ class reserve:
                 logging.debug("Failed to save rotate captcha images: %s", e)
 
         try:
-            from utils.tulingcloud_ocr import TulingCloudOCR
+            from utils.captcha_ocr import TulingCloudOCR
 
             username, password, model_id = _get_tulingcloud_config(
-                model_id_env="TULINGCLOUD_SPIN_MODEL_ID"
+                captcha_type="rotate"
             )
             if not all([username, password, model_id]):
                 logging.error(
                     "Set TULINGCLOUD_USERNAME, TULINGCLOUD_PASSWORD, "
-                    "TULINGCLOUD_SPIN_MODEL_ID in env or config.json"
+                    "and rotate model_id in utils/captcha_ocr/config.py"
                 )
                 return None
 
@@ -1874,7 +1902,7 @@ class reserve:
                 logging.debug(f"Failed to save captcha image: {e}")
         
         try:
-            from utils.chaojiying_ocr import ChaojiyingOCR
+            from utils.captcha_ocr import ChaojiyingOCR
 
             chaojiying_username, chaojiying_password, chaojiying_soft_id, chaojiying_codetype = _get_chaojiying_config()
             if all([chaojiying_username, chaojiying_password, chaojiying_soft_id]):
@@ -1930,58 +1958,14 @@ class reserve:
                         f"on attempt {attempt}/3"
                     )
                 logging.warning(
-                    "Chaojiying textclick OCR failed 3 times, fallback to TulingCloud"
+                    "Chaojiying textclick OCR failed 3 times"
                 )
             else:
-                logging.warning(
-                    "Chaojiying credentials not configured, fallback to TulingCloud"
-                )
+                logging.error("Chaojiying credentials not configured for textclick captcha")
         except Exception as e:
-            logging.warning(f"Chaojiying textclick OCR raised, fallback to TulingCloud: {e}")
+            logging.warning(f"Chaojiying textclick OCR raised: {e}")
 
-        try:
-            from utils.tulingcloud_ocr import TulingCloudOCR
-
-            tuling_username, tuling_password, tuling_model_id = _get_tulingcloud_config()
-            if not all([tuling_username, tuling_password, tuling_model_id]):
-                logging.error("TulingCloud credentials not properly configured")
-                logging.error(
-                    "Set TULINGCLOUD_USERNAME, TULINGCLOUD_PASSWORD, "
-                    "TULINGCLOUD_MODEL_ID in env or config.json"
-                )
-                return None
-
-            logging.debug(
-                "TulingCloud config - username: %s..., model_id=%s",
-                tuling_username[:6],
-                tuling_model_id,
-            )
-            ocr = TulingCloudOCR(
-                username=tuling_username,
-                password=tuling_password,
-                model_id=tuling_model_id,
-            )
-            ocr_started = _time.monotonic()
-            try:
-                ocr_result = ocr.recognize_textclick(img_bytes)
-            except Exception:
-                logging.warning(
-                    "TulingCloud textclick OCR request failed after %.3fs",
-                    _time.monotonic() - ocr_started,
-                )
-                raise
-            logging.info(
-                "TulingCloud textclick OCR request took %.3fs",
-                _time.monotonic() - ocr_started,
-            )
-            return self._match_textclick_ocr_positions(
-                ocr_result, target_text, "TulingCloud"
-            )
-        except Exception as e:
-            logging.debug(f"Textclick OCR fallback failed: {e}")
-            import traceback
-            logging.debug(traceback.format_exc())
-            return None
+        return None
 
     def get_slide_captcha_data(self):
         url = "https://captcha.chaoxing.com/captcha/get/verification/image"

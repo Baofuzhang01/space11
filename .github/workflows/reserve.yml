@@ -96,8 +96,6 @@ jobs:
           CHAOJIYING_CODETYPE: ${{ secrets.CHAOJIYING_CODETYPE }}
           TULINGCLOUD_USERNAME: ${{ secrets.TULINGCLOUD_USERNAME }}
           TULINGCLOUD_PASSWORD: ${{ secrets.TULINGCLOUD_PASSWORD }}
-          TULINGCLOUD_MODEL_ID: ${{ secrets.TULINGCLOUD_MODEL_ID }}
-          TULINGCLOUD_SPIN_MODEL_ID: ${{ secrets.TULINGCLOUD_SPIN_MODEL_ID }}
         run: |
           set +e
           python main.py --action --dispatch 2>&1 | tee reserve.log
@@ -355,8 +353,6 @@ jobs:
           CHAOJIYING_CODETYPE: ${{ secrets.CHAOJIYING_CODETYPE }}
           TULINGCLOUD_USERNAME: ${{ secrets.TULINGCLOUD_USERNAME }}
           TULINGCLOUD_PASSWORD: ${{ secrets.TULINGCLOUD_PASSWORD }}
-          TULINGCLOUD_MODEL_ID: ${{ secrets.TULINGCLOUD_MODEL_ID }}
-          TULINGCLOUD_SPIN_MODEL_ID: ${{ secrets.TULINGCLOUD_SPIN_MODEL_ID }}
         run: |
           set +e
           python main.py --action 2>&1 | tee reserve.log

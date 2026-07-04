@@ -291,6 +291,7 @@ ENABLE_SLIDER = False  # 是否有滑块验证（调试阶段先关闭）
 ENABLE_TEXTCLICK = False  # 是否有选字验证码（默认使用超级鹰打码平台）
 ENABLE_ICONCLICK = False  # 是否有图标点选验证码（超级鹰 9103）
 ENABLE_ROTATE = False  # 是否有旋转滑块验证码（使用图灵云 rotate 模型）
+ICONCLICK_OCR_PROVIDER = "chaojiying"  # 图标点选识别平台：chaojiying / tulingcloud
 SEAT_API_MODE = "seat"  # 页面 token 接口模式：auto / seatengine / seat / seatengine_code / seat_code
 
 FAST_PROBE_START_OFFSET_MS = 14  # 目标时间后多少毫秒开始轻探测
@@ -382,6 +383,7 @@ def _load_runtime_config(config_path, dispatch_mode, action):
             "enable_textclick": payload.get("enable_textclick", ENABLE_TEXTCLICK),
             "enable_iconclick": payload.get("enable_iconclick", ENABLE_ICONCLICK),
             "enable_rotate": payload.get("enable_rotate", ENABLE_ROTATE),
+            "iconclick_ocr_provider": payload.get("iconclick_ocr_provider", ICONCLICK_OCR_PROVIDER),
             "relogin_every_loop": False,
         }
 
@@ -419,6 +421,7 @@ def _apply_strategy_config(config):
     global ENABLE_TEXTCLICK
     global ENABLE_ICONCLICK
     global ENABLE_ROTATE
+    global ICONCLICK_OCR_PROVIDER
     global STRATEGY_LOGIN_LEAD_SECONDS
     global STRATEGY_SLIDER_LEAD_MS
     global STRATEGIC_MODE
@@ -443,6 +446,12 @@ def _apply_strategy_config(config):
     ENABLE_TEXTCLICK = bool(config.get("enable_textclick", ENABLE_TEXTCLICK))
     ENABLE_ICONCLICK = bool(config.get("enable_iconclick", ENABLE_ICONCLICK))
     ENABLE_ROTATE = bool(config.get("enable_rotate", ENABLE_ROTATE))
+    iconclick_provider = str(config.get("iconclick_ocr_provider", ICONCLICK_OCR_PROVIDER)).strip().lower()
+    ICONCLICK_OCR_PROVIDER = (
+        iconclick_provider
+        if iconclick_provider in {"chaojiying", "tulingcloud"}
+        else "chaojiying"
+    )
     seat_api_mode = str(config.get("seat_api_mode", SEAT_API_MODE)).strip().lower()
     SEAT_API_MODE = (
         seat_api_mode
@@ -965,6 +974,7 @@ def strategic_first_attempt(
                 enable_textclick=ENABLE_TEXTCLICK,
                 enable_iconclick=ENABLE_ICONCLICK,
                 enable_rotate=ENABLE_ROTATE,
+                iconclick_ocr_provider=ICONCLICK_OCR_PROVIDER,
                 reserve_next_day=RESERVE_NEXT_DAY,
                 reserve_day_offset=RESERVE_DAY_OFFSET,
             )
@@ -1066,6 +1076,7 @@ def strategic_first_attempt(
                             enable_textclick=ENABLE_TEXTCLICK,
                             enable_iconclick=ENABLE_ICONCLICK,
                             enable_rotate=ENABLE_ROTATE,
+                            iconclick_ocr_provider=ICONCLICK_OCR_PROVIDER,
                             reserve_next_day=RESERVE_NEXT_DAY,
                             reserve_day_offset=RESERVE_DAY_OFFSET,
                         )
@@ -1116,6 +1127,7 @@ def strategic_first_attempt(
                         enable_textclick=ENABLE_TEXTCLICK,
                         enable_iconclick=ENABLE_ICONCLICK,
                         enable_rotate=ENABLE_ROTATE,
+                        iconclick_ocr_provider=ICONCLICK_OCR_PROVIDER,
                         reserve_next_day=RESERVE_NEXT_DAY,
                         reserve_day_offset=RESERVE_DAY_OFFSET,
                     )
@@ -1226,6 +1238,7 @@ def strategic_first_attempt(
                             enable_textclick=ENABLE_TEXTCLICK,
                             enable_iconclick=ENABLE_ICONCLICK,
                             enable_rotate=ENABLE_ROTATE,
+                            iconclick_ocr_provider=ICONCLICK_OCR_PROVIDER,
                             reserve_next_day=RESERVE_NEXT_DAY,
                             reserve_day_offset=RESERVE_DAY_OFFSET,
                         )
@@ -2427,6 +2440,7 @@ def login_and_reserve(
                         enable_textclick=ENABLE_TEXTCLICK,
                         enable_iconclick=ENABLE_ICONCLICK,
                         enable_rotate=ENABLE_ROTATE,
+                        iconclick_ocr_provider=ICONCLICK_OCR_PROVIDER,
                         reserve_next_day=RESERVE_NEXT_DAY,
                         reserve_day_offset=RESERVE_DAY_OFFSET,
                     )
@@ -2448,6 +2462,7 @@ def login_and_reserve(
                     enable_textclick=ENABLE_TEXTCLICK,
                     enable_iconclick=ENABLE_ICONCLICK,
                     enable_rotate=ENABLE_ROTATE,
+                    iconclick_ocr_provider=ICONCLICK_OCR_PROVIDER,
                     reserve_next_day=RESERVE_NEXT_DAY,
                     reserve_day_offset=RESERVE_DAY_OFFSET,
                 )
@@ -2693,6 +2708,7 @@ def debug(users, action=False):
             enable_textclick=ENABLE_TEXTCLICK,
             enable_iconclick=ENABLE_ICONCLICK,
             enable_rotate=ENABLE_ROTATE,
+            iconclick_ocr_provider=ICONCLICK_OCR_PROVIDER,
             reserve_next_day=RESERVE_NEXT_DAY,
             reserve_day_offset=RESERVE_DAY_OFFSET,
         )
@@ -2724,6 +2740,7 @@ def get_roomid(args1, args2):
         enable_textclick=ENABLE_TEXTCLICK,
         enable_iconclick=ENABLE_ICONCLICK,
         enable_rotate=ENABLE_ROTATE,
+        iconclick_ocr_provider=ICONCLICK_OCR_PROVIDER,
         reserve_next_day=RESERVE_NEXT_DAY,
         reserve_day_offset=RESERVE_DAY_OFFSET,
     )
