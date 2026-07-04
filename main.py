@@ -871,6 +871,7 @@ def strategic_first_attempt(
         live_captcha_results = None
         textclick_preheat_thread = None
         click_captcha_type = "iconclick" if ENABLE_ICONCLICK else "textclick"
+        click_captcha_name = "图标点选" if ENABLE_ICONCLICK else "文字点选"
 
         def _resolve_textclick_with_retries(
             captcha_session,
@@ -884,19 +885,19 @@ def strategic_first_attempt(
                 attempt += 1
                 if deadline_func is not None and deadline_func() <= 0:
                     logging.warning(
-                        f"[strategic] {click_captcha_type} {label} stopped before success: preheat deadline reached"
+                        f"[策略] {click_captcha_name} {label} 已停止：达到预热截止时间"
                     )
                     return ""
                 try:
                     captcha = captcha_session.resolve_captcha(click_captcha_type) or ""
                 except Exception as e:
                     logging.debug(
-                        f"[strategic] {click_captcha_type} {label} attempt {attempt} raised: {e}"
+                        f"[策略] {click_captcha_name} {label} 第 {attempt} 次请求异常：{e}"
                     )
                     captcha = ""
                 if captcha:
                     logging.info(
-                        f"[strategic] {click_captcha_type} {label} resolved on attempt {attempt}"
+                        f"[策略] {click_captcha_name} {label} 第 {attempt} 次请求成功"
                     )
                     return captcha
                 if max_retries is None or attempt < max_retries:
@@ -908,7 +909,7 @@ def strategic_first_attempt(
                             time.sleep(sleep_s)
 
             logging.warning(
-                f"[strategic] {click_captcha_type} {label} failed after {max_retries} attempts"
+                f"[策略] {click_captcha_name} {label} 请求 {max_retries} 次后仍失败"
             )
             return ""
 
@@ -1214,7 +1215,7 @@ def strategic_first_attempt(
                 remaining = _remaining_captcha_seconds()
                 if remaining <= 0:
                     logging.warning(
-                        f"[strategic] Captcha preheat budget exhausted before {click_captcha_type} starts, skip preheat"
+                        f"[策略] {click_captcha_name} 开始前已耗尽预热时间，跳过预热"
                     )
                 else:
                     def _make_textclick_worker():
@@ -1249,14 +1250,14 @@ def strategic_first_attempt(
                             ) or ""
                         except Exception as e:
                             logging.warning(
-                                f"[strategic] {click_captcha_type} captcha1 preheat thread failed: {e}"
+                                f"[策略] {click_captcha_name} 第一个验证码预热线程失败：{e}"
                             )
                             captcha_results[1] = ""
 
                     deadline_mono = time.monotonic() + remaining
                     logging.info(
-                        f"[strategic] Preheat {click_captcha_type} captcha1 until it has validate "
-                        "or reaches the target-time captcha deadline"
+                        f"[策略] 开始预热{click_captcha_name}第一个验证码，"
+                        "持续到取得验证令牌或达到目标时间截止点"
                     )
                     textclick_preheat_thread = threading.Thread(
                         target=_worker,
@@ -1272,7 +1273,7 @@ def strategic_first_attempt(
                 captcha2 = ""
                 captcha3 = ""
                 logging.info(
-                    f"[strategic] Pre-resolved {click_captcha_type} captcha ready: %s",
+                    f"[策略] {click_captcha_name}预热结果是否就绪：%s",
                     bool(captcha1),
                 )
         else:
@@ -1311,7 +1312,7 @@ def strategic_first_attempt(
                 captcha3 = s.resolve_captcha(active_captcha_type) or ""
             elif ENABLE_TEXTCLICK or ENABLE_ICONCLICK:
                 logging.info(
-                    f"[strategic] Captcha preheat skipped for this config; resolve one {click_captcha_type} captcha first"
+                    f"[策略] 当前配置跳过验证码预热，先获取一个{click_captcha_name}验证码"
                 )
                 captcha1 = _resolve_textclick_with_retries(
                     s,
@@ -1414,21 +1415,65 @@ def strategic_first_attempt(
             if not (0 <= list_idx < len(captchas_for_submit)):
                 return
 
+            if (
+                textclick_preheat_thread is not None
+                and textclick_preheat_thread.is_alive()
+            ):
+                wait_s = max(
+                    0.0,
+                    (
+                        _get_beijing_end_dt_from_target(target_dt) - _beijing_now()
+                    ).total_seconds(),
+                )
+                logging.info(
+                    "[策略] %s预热仍在进行，最多等待 %.3f 秒；"
+                    "优先复用结果，不重复发起请求",
+                    click_captcha_name,
+                    wait_s,
+                )
+                textclick_preheat_thread.join(timeout=wait_s)
+                _refresh_submit_captchas_from_live_results()
+                if captchas_for_submit[list_idx]:
+                    logging.info(
+                        "[策略] 第 %d 次提交复用稍晚返回的%s预热结果",
+                        shot_idx,
+                        click_captcha_name,
+                    )
+                    return
+                if _beijing_now() >= _get_beijing_end_dt_from_target(target_dt):
+                    logging.warning(
+                        "[策略] 已到结束时间，跳过第 %d 次提交的新%s请求",
+                        shot_idx,
+                        click_captcha_name,
+                    )
+                    return
+
+            if _beijing_now() >= _get_beijing_end_dt_from_target(target_dt):
+                logging.warning(
+                    "[策略] 已到结束时间，跳过第 %d 次提交的新%s请求",
+                    shot_idx,
+                    click_captcha_name,
+                )
+                return
+
             logging.info(
-                f"[strategic] {reason}; immediately resolve a fresh {click_captcha_type} captcha "
-                f"for submit shot {shot_idx} and replace the reused preheated captcha"
+                f"[策略] {reason}；立即为第 {shot_idx} 次提交获取新的"
+                f"{click_captcha_name}验证码，并替换复用的预热验证码"
             )
             captchas_for_submit[list_idx] = ""
+            effective_max_retries = (
+                1 if ENABLE_ICONCLICK and max_retries is None else max_retries
+            )
             captcha = _resolve_textclick_with_retries(
                 s,
                 f"submit shot {shot_idx}",
-                max_retries=max_retries,
+                max_retries=effective_max_retries,
             ) or ""
             if captcha:
                 captchas_for_submit[list_idx] = captcha
             else:
                 logging.warning(
-                    f"[strategic] Failed to prepare {click_captcha_type} captcha for submit shot {shot_idx}"
+                    f"[策略] 为第 {shot_idx} 次提交准备{click_captcha_name}验证码失败"
                 )
 
         def _prepare_rotate_captcha_for_submit(
@@ -1576,8 +1621,8 @@ def strategic_first_attempt(
                 ):
                     wait_s = max(0.0, (hard_deadline - _beijing_now()).total_seconds())
                     logging.info(
-                        f"[strategic] {click_captcha_type} preheat thread is still running; "
-                        "wait for existing captcha request before starting another"
+                        f"[策略] {click_captcha_name}预热线程仍在运行，"
+                        "等待现有验证码请求，不再重复发起"
                     )
                     textclick_preheat_thread.join(timeout=wait_s)
                     _refresh_submit_captchas_from_live_results()

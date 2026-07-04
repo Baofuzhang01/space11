@@ -1256,12 +1256,13 @@ class reserve:
         """裁掉未展示的提示帧，使用超级鹰 9103 识别图标点击顺序。"""
         captcha_token, captcha_iv, image_url = self.get_iconclick_captcha_data()
         if not captcha_token or not image_url:
-            logging.warning("Failed to get iconclick captcha payload")
+            logging.warning("获取图标点选验证码数据失败")
             return ""
         try:
             import cv2
             import numpy as np
 
+            image_download_started = time.monotonic()
             image_response = self._get(
                 image_url,
                 headers={
@@ -1269,9 +1270,14 @@ class reserve:
                     "Referer": "https://office.chaoxing.com/",
                     "User-Agent": self.headers["User-Agent"],
                 },
-                request_name="iconclick image download",
+                request_name="图标验证码图片下载",
             )
             image_response.raise_for_status()
+            logging.info(
+                "图标验证码图片下载耗时 %.3f 秒（%d 字节）",
+                time.monotonic() - image_download_started,
+                len(image_response.content),
+            )
             image = cv2.imdecode(
                 np.frombuffer(image_response.content, np.uint8), cv2.IMREAD_COLOR
             )
@@ -1286,17 +1292,17 @@ class reserve:
 
             username, password, soft_id, _ = _get_chaojiying_config()
             if not all([username, password, soft_id]):
-                logging.error("Chaojiying credentials not configured for iconclick")
+                logging.error("未配置图标点选所需的超级鹰账号信息")
                 return ""
             positions = ChaojiyingOCR(
                 username, password, soft_id, codetype=9103
             ).recognize_iconclick(encoded.tobytes())
         except Exception as e:
-            logging.warning("Iconclick recognition failed: %s", e)
+            logging.warning("图标点选识别失败：%s", e)
             return ""
         if not positions:
             return ""
-        logging.info("Iconclick positions: %s", positions)
+        logging.info("图标点选坐标：%s", positions)
         return self.submit_iconclick_captcha(captcha_token, captcha_iv, positions)
 
     def _resolve_iconclick_captcha_with_retry(self, max_attempts: int = 2):
@@ -1304,7 +1310,7 @@ class reserve:
             captcha = self._resolve_iconclick_captcha()
             if captcha:
                 return captcha
-            logging.warning("Iconclick captcha attempt %d failed", attempt)
+            logging.warning("第 %d 次图标验证码识别失败", attempt)
         return ""
 
     def _resolve_rotate_captcha(self):
@@ -1677,10 +1683,10 @@ class reserve:
                 "https://captcha.chaoxing.com/captcha/get/verification/image",
                 params=params,
                 headers=self.headers,
-                request_name="iconclick captcha fetch",
+                request_name="图标验证码获取",
             )
         except requests.exceptions.RequestException as e:
-            logging.warning("Failed to fetch iconclick captcha data: %s", e)
+            logging.warning("获取图标验证码失败：%s", e)
             return "", "", ""
 
         text = response.text.strip()
@@ -1689,7 +1695,7 @@ class reserve:
         try:
             data = json.loads(text)
         except ValueError as e:
-            logging.error("Failed to parse iconclick captcha payload: %s", e)
+            logging.error("解析图标验证码数据失败：%s", e)
             return "", "", ""
 
         return data.get("token") or "", captcha_iv, (
@@ -2482,9 +2488,9 @@ class reserve:
                         continue
                 elif self.enable_iconclick:
                     captcha = self._resolve_iconclick_captcha_with_retry(max_attempts=3)
-                    logging.info("Iconclick captcha token: %s", captcha)
+                    logging.info("图标验证码令牌：%s", captcha)
                     if not captcha:
-                        logging.warning("Skip submit because iconclick captcha is empty")
+                        logging.warning("图标验证码为空，跳过本次提交")
                         time.sleep(self.sleep_time)
                         self.max_attempt -= 1
                         continue

@@ -1,6 +1,7 @@
 import base64
 import logging
 import re
+import time
 from hashlib import md5
 from typing import Optional
 
@@ -121,18 +122,30 @@ class ChaojiyingOCR:
             "codetype": 9103,
             "file_base64": self._normalize_base64(b64_data),
         }
+        request_started = time.monotonic()
+        logging.info("超级鹰 9103 请求已开始")
         try:
-            result = requests.post(
+            response = requests.post(
                 self.API_URL,
                 data=params,
                 headers=self.headers,
                 timeout=30,
-            ).json()
+            )
+            response_received = time.monotonic()
+            result = response.json()
         except Exception as e:
-            logging.debug("Chaojiying iconclick request failed: %s", e)
+            logging.warning(
+                "超级鹰 9103 请求失败，耗时 %.3f 秒：%s",
+                time.monotonic() - request_started,
+                e,
+            )
             return None
+        logging.info(
+            "超级鹰 9103 网络连接及人工处理总耗时：%.3f 秒",
+            response_received - request_started,
+        )
         if int(result.get("err_no") or 0) != 0:
-            logging.debug("Chaojiying iconclick failed: %s", result)
+            logging.debug("超级鹰图标点选识别失败：%s", result)
             return None
         try:
             return [
@@ -143,5 +156,5 @@ class ChaojiyingOCR:
                 )
             ]
         except ValueError:
-            logging.debug("Invalid Chaojiying 9103 pic_str: %s", result.get("pic_str"))
+            logging.debug("超级鹰 9103 返回的坐标格式无效：%s", result.get("pic_str"))
             return None
