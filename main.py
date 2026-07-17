@@ -365,6 +365,16 @@ def _normalize_times(times):
     return parse_times_range(times)
 
 
+def _split_action_credentials(usernames, passwords):
+    """单账号 CX_* 凭据原样使用；只有旧版多账号变量才按逗号拆分。"""
+    if (
+        usernames == os.environ.get("CX_USERNAME")
+        and passwords == os.environ.get("CX_PASSWORD")
+    ):
+        return [usernames], [passwords]
+    return usernames.split(","), passwords.split(",")
+
+
 def _load_runtime_config(config_path, dispatch_mode, action):
     if dispatch_mode:
         payload_raw = os.environ.get("DISPATCH_PAYLOAD")
@@ -536,9 +546,9 @@ def _apply_strategy_config(config):
         (ENABLE_ROTATE or ENABLE_SLIDER or ENABLE_TEXTCLICK or ENABLE_ICONCLICK)
         and STRATEGY_SLIDER_LEAD_MS > STRATEGY_LOGIN_LEAD_SECONDS * 1000
     ):
-        logging.warning(
+        logging.info(
             "[策略] 验证码预热提前量 %dms 超过登录提前量 %ds；"
-            "实际验证码预热不能早于登录完成",
+            "将自动延后到登录完成后立即开始",
             STRATEGY_SLIDER_LEAD_MS,
             STRATEGY_LOGIN_LEAD_SECONDS,
         )
@@ -648,6 +658,16 @@ def _get_first_token_start_dt(target_dt: datetime.datetime) -> datetime.datetime
     if STRATEGIC_MODE == "C":
         return target_dt + datetime.timedelta(milliseconds=FAST_PROBE_START_OFFSET_MS)
     return target_dt + datetime.timedelta(milliseconds=FIRST_SUBMIT_OFFSET_MS)
+
+
+def _get_captcha_start_dt(
+    target_dt: datetime.datetime,
+    login_completed_at: datetime.datetime,
+) -> datetime.datetime:
+    configured_start_dt = target_dt - datetime.timedelta(
+        milliseconds=STRATEGY_SLIDER_LEAD_MS
+    )
+    return max(configured_start_dt, login_completed_at)
 
 
 def _get_captcha_preheat_deadline(
@@ -867,8 +887,9 @@ def strategic_first_attempt(
     if action:
         if not usernames or not passwords:
             raise Exception("USERNAMES or PASSWORDS not configured correctly in env")
-        usernames_list = usernames.split(",")
-        passwords_list = passwords.split(",")
+        usernames_list, passwords_list = _split_action_credentials(
+            usernames, passwords
+        )
         if len(usernames_list) != len(passwords_list):
             raise Exception("USERNAMES and PASSWORDS count mismatch")
 
@@ -1112,9 +1133,7 @@ def strategic_first_attempt(
             shared_strategy_session = s
             shared_strategy_username = username
 
-            captcha_start_dt = target_dt - datetime.timedelta(
-                milliseconds=STRATEGY_SLIDER_LEAD_MS
-            )
+            captcha_start_dt = _get_captcha_start_dt(target_dt, _beijing_now())
             warm_dt = target_dt - datetime.timedelta(
                 milliseconds=WARM_CONNECTION_LEAD_MS
             )
@@ -2751,8 +2770,9 @@ def login_and_reserve(
     if action:
         if not usernames or not passwords:
             raise Exception("USERNAMES or PASSWORDS not configured correctly in env")
-        usernames_list = usernames.split(",")
-        passwords_list = passwords.split(",")
+        usernames_list, passwords_list = _split_action_credentials(
+            usernames, passwords
+        )
         if len(usernames_list) != len(passwords_list):
             raise Exception("USERNAMES and PASSWORDS count mismatch")
 
@@ -3034,8 +3054,9 @@ def debug(users, action=False):
         if not usernames or not passwords:
             logging.error("USERNAMES or PASSWORDS not configured correctly in env.")
             return
-        usernames_list = usernames.split(",")
-        passwords_list = passwords.split(",")
+        usernames_list, passwords_list = _split_action_credentials(
+            usernames, passwords
+        )
         if len(usernames_list) != len(passwords_list):
             logging.error("USERNAMES and PASSWORDS count mismatch.")
             return
